@@ -1,0 +1,22 @@
+{
+  "id": "example-simple",
+  "name": "Simple Text Monitor",
+  "url": "https://example.com",
+  "enabled": true,
+
+  "extractors": [
+    {
+      "name": "heading",
+      "type": "text",
+      "selector": "h1",
+      "transform": "first"
+    },
+    {
+      "name": "paragraphs",
+      "type": "text",
+      "selector": "p"
+    }
+  ],
+
+  "comparator": "hash"
+}

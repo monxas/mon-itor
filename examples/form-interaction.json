@@ -1,0 +1,43 @@
+{
+  "id": "form-example",
+  "name": "Form Interaction Example",
+  "url": "https://example.com/search",
+  "enabled": false,
+
+  "actions": [
+    {
+      "type": "type",
+      "selector": "#search-input",
+      "value": "search term"
+    },
+    {
+      "type": "click",
+      "selector": "#search-button"
+    },
+    {
+      "type": "waitForSelector",
+      "selector": ".results",
+      "timeout": 10000
+    },
+    {
+      "type": "wait",
+      "ms": 2000,
+      "comment": "Wait for AJAX results"
+    }
+  ],
+
+  "extractors": [
+    {
+      "name": "resultCount",
+      "type": "count",
+      "selector": ".result-item"
+    },
+    {
+      "name": "results",
+      "type": "text",
+      "selector": ".result-item .title"
+    }
+  ],
+
+  "comparator": "length"
+}

@@ -1,0 +1,12 @@
+{
+  "name": "web-monitor",
+  "version": "1.0.0",
+  "description": "Generic web monitoring with Playwright",
+  "main": "monitor.js",
+  "scripts": {
+    "start": "node monitor.js"
+  },
+  "dependencies": {
+    "playwright": "^1.57.0"
+  }
+}

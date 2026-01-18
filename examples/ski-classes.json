@@ -1,0 +1,48 @@
+{
+  "id": "ski-palarinsal",
+  "name": "Pal Arinsal Ski Classes",
+  "url": "https://shop.palarinsal.com/es/search-c/valoracion-escuela.html?bsq=3C032691FCB51BE17F519B266E95876F",
+  "enabled": true,
+
+  "actions": [
+    {
+      "type": "click",
+      "selector": ".cmpboxbtnyes",
+      "checkFrames": true,
+      "optional": true,
+      "comment": "Dismiss cookie consent popup"
+    },
+    {
+      "type": "wait",
+      "ms": 2000
+    },
+    {
+      "type": "waitForSelector",
+      "selector": "select.select_horas",
+      "timeout": 15000
+    }
+  ],
+
+  "extractors": [
+    {
+      "name": "times",
+      "type": "options",
+      "selector": "select.select_horas",
+      "transform": "filter",
+      "filter": {
+        "exclude": ["13:00", "14:00"]
+      },
+      "comment": "Get time options, excluding known times"
+    },
+    {
+      "name": "allTimes",
+      "type": "options",
+      "selector": "select.select_horas",
+      "comment": "All available times for logging"
+    }
+  ],
+
+  "comparator": "added",
+
+  "messageTemplate": "🎿 <b>NEW SKI CLASS TIMES!</b>\n\n{{changes}}\n\n🔗 <a href=\"{{url}}\">Book now!</a>"
+}

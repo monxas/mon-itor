@@ -1,0 +1,37 @@
+{
+  "id": "stock-example",
+  "name": "Product Stock Check",
+  "url": "https://example-store.com/product",
+  "enabled": false,
+
+  "actions": [
+    {
+      "type": "waitForSelector",
+      "selector": ".product-info"
+    }
+  ],
+
+  "extractors": [
+    {
+      "name": "inStock",
+      "type": "exists",
+      "selector": ".add-to-cart:not([disabled])"
+    },
+    {
+      "name": "price",
+      "type": "text",
+      "selector": ".price",
+      "transform": "first"
+    },
+    {
+      "name": "stockText",
+      "type": "text",
+      "selector": ".stock-status",
+      "transform": "first"
+    }
+  ],
+
+  "comparator": "exact",
+
+  "messageTemplate": "🛒 <b>Stock Update: {{name}}</b>\n\nIn Stock: {{data.inStock}}\nPrice: {{data.price}}\n\n🔗 <a href=\"{{url}}\">View product</a>"
+}
