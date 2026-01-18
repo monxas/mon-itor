@@ -70,6 +70,9 @@ let notificationTimestamps = new Map();
 let errorCounts = new Map();
 let configHashes = new Map();
 let persistentContexts = new Map();
+let watchHistory = new Map(); // Last N results per watch
+let watchSchedules = new Map(); // Next scheduled run time per watch
+const HISTORY_SIZE = parseInt(process.env.HISTORY_SIZE) || 10;
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -819,6 +822,19 @@ function detectChanges(current, previous, config, extractors = []) {
         changed = false;
         break;
 
+      case 'regex':
+        // Alert when pattern matches (or doesn't match if negate: true)
+        const pattern = extractor?.pattern || config.pattern;
+        if (pattern) {
+          const regex = new RegExp(pattern, extractor?.flags || config.flags || '');
+          const strValue = typeof value === 'string' ? value : JSON.stringify(value);
+          const matches = regex.test(strValue);
+          const negate = extractor?.negate || config.negate || false;
+          changed = negate ? !matches : matches;
+          details = { pattern, matches, negate };
+        }
+        break;
+
       case 'custom':
         if (config.customComparator) {
           try {
@@ -1273,12 +1289,30 @@ async function processWatch(config) {
     }
   }
 
-  lastCheckResults[watchId] = {
+  const resultEntry = {
     ...result,
     timestamp: new Date().toISOString(),
     name: config.name,
     errorCount: errorCounts.get(watchId) || 0
   };
+
+  lastCheckResults[watchId] = resultEntry;
+
+  // Add to history
+  if (!watchHistory.has(watchId)) {
+    watchHistory.set(watchId, []);
+  }
+  const history = watchHistory.get(watchId);
+  history.unshift({
+    timestamp: resultEntry.timestamp,
+    success: result.success,
+    data: result.data,
+    error: result.error,
+    changes: result.changes?.length || 0
+  });
+  if (history.length > HISTORY_SIZE) {
+    history.pop();
+  }
 
   return result;
 }
@@ -1339,6 +1373,7 @@ function scheduleWatch(config) {
   if (config.schedule) {
     // Cron-based scheduling (check every minute)
     let lastRun = null;
+    watchSchedules.set(watchId, { type: 'cron', schedule: config.schedule });
     const cronJob = setInterval(() => {
       if (config.enabled !== false && shouldRunCron(config.schedule, lastRun)) {
         lastRun = new Date().toISOString();
@@ -1350,8 +1385,15 @@ function scheduleWatch(config) {
   } else {
     // Interval-based scheduling
     const interval = config.interval || DEFAULT_CHECK_INTERVAL_MS;
+    const nextRun = new Date(Date.now() + interval);
+    watchSchedules.set(watchId, { type: 'interval', interval, nextRun: nextRun.toISOString() });
     const timer = setInterval(() => {
       if (config.enabled !== false) {
+        watchSchedules.set(watchId, {
+          type: 'interval',
+          interval,
+          nextRun: new Date(Date.now() + interval).toISOString()
+        });
         processWatch(config);
       }
     }, interval);
@@ -1386,39 +1428,102 @@ function checkConfigChanges() {
 // HEALTH SERVER + WEB UI
 // ============================================================================
 
-function generateDashboardHTML() {
+function formatNextRun(watchId) {
+  const schedule = watchSchedules.get(watchId);
+  if (!schedule) return '-';
+  if (schedule.type === 'cron') return `cron: ${schedule.schedule}`;
+  if (schedule.nextRun) {
+    const next = new Date(schedule.nextRun);
+    const diff = next - Date.now();
+    if (diff < 0) return 'soon';
+    const mins = Math.floor(diff / 60000);
+    const secs = Math.floor((diff % 60000) / 1000);
+    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  }
+  return '-';
+}
+
+function formatData(data) {
+  if (!data) return '-';
+  const entries = Object.entries(data);
+  if (entries.length === 0) return '-';
+  return entries.map(([k, v]) => {
+    const val = Array.isArray(v) ? (v.length > 3 ? `[${v.slice(0,3).join(', ')}... +${v.length-3}]` : `[${v.join(', ')}]`) :
+                typeof v === 'object' ? JSON.stringify(v).substring(0, 50) :
+                String(v).substring(0, 50);
+    return `<b>${k}:</b> ${val}`;
+  }).join('<br>');
+}
+
+function generateDashboardHTML(darkMode = false) {
   const watches = Object.values(lastCheckResults);
-  const watchRows = watches.map(w => `
+  const watchRows = watches.map(w => {
+    const history = watchHistory.get(w.watchId) || [];
+    const historyDots = history.slice(0, 10).map(h =>
+      `<span class="dot ${h.success ? 'success' : 'fail'}" title="${h.timestamp}${h.error ? ': ' + h.error : ''}"></span>`
+    ).join('');
+
+    return `
     <tr class="${w.success ? '' : 'error'}">
-      <td>${w.name || w.watchId}</td>
+      <td>
+        <strong>${w.name || w.watchId}</strong>
+        <div class="history">${historyDots}</div>
+      </td>
       <td>${w.success ? '✅' : '❌'}</td>
-      <td>${w.lastCheck ? new Date(w.lastCheck).toLocaleString() : '-'}</td>
+      <td>${w.timestamp ? new Date(w.timestamp).toLocaleString() : '-'}</td>
+      <td>${formatNextRun(w.watchId)}</td>
+      <td class="data-cell">${formatData(w.data)}</td>
       <td>${w.error || '-'}</td>
-      <td>${w.errorCount || 0}</td>
-    </tr>
-  `).join('');
+      <td>
+        <button class="run-btn" onclick="triggerWatch('${w.watchId}')">▶ Run</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const bg = darkMode ? '#1a1a2e' : '#f5f5f5';
+  const cardBg = darkMode ? '#16213e' : 'white';
+  const text = darkMode ? '#eee' : '#333';
+  const textMuted = darkMode ? '#aaa' : '#666';
+  const tableBg = darkMode ? '#0f3460' : '#333';
+  const rowHover = darkMode ? '#1a1a40' : '#f5f5f5';
+  const border = darkMode ? '#0f3460' : '#ddd';
 
   return `<!DOCTYPE html>
 <html>
 <head>
-  <title>Web Monitor Dashboard</title>
+  <meta charset="UTF-8">
+  <title>mon-itor Dashboard</title>
   <meta http-equiv="refresh" content="30">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; background: #f5f5f5; }
-    h1 { color: #333; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; background: ${bg}; color: ${text}; }
+    h1 { color: ${text}; }
+    .header { display: flex; justify-content: space-between; align-items: center; }
     .status { padding: 10px 20px; border-radius: 5px; display: inline-block; margin-bottom: 20px; }
     .status.healthy { background: #d4edda; color: #155724; }
     .status.unhealthy { background: #f8d7da; color: #721c24; }
-    table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
-    th { background: #333; color: white; }
-    tr:hover { background: #f5f5f5; }
-    tr.error { background: #fff3f3; }
-    .uptime { color: #666; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; background: ${cardBg}; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+    th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid ${border}; }
+    th { background: ${tableBg}; color: white; }
+    tr:hover { background: ${rowHover}; }
+    tr.error { background: ${darkMode ? '#3d1a1a' : '#fff3f3'}; }
+    .uptime { color: ${textMuted}; font-size: 14px; }
+    .data-cell { font-size: 12px; max-width: 300px; overflow: hidden; }
+    .run-btn { padding: 5px 12px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .run-btn:hover { background: #45a049; }
+    .run-btn:disabled { background: #ccc; cursor: not-allowed; }
+    .dark-toggle { padding: 8px 16px; background: ${darkMode ? '#fff' : '#333'}; color: ${darkMode ? '#333' : '#fff'}; border: none; border-radius: 4px; cursor: pointer; }
+    .history { margin-top: 4px; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 2px; }
+    .dot.success { background: #4CAF50; }
+    .dot.fail { background: #f44336; }
+    .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 24px; background: #333; color: white; border-radius: 4px; display: none; }
   </style>
 </head>
 <body>
-  <h1>🔍 Web Monitor Dashboard</h1>
+  <div class="header">
+    <h1>🔍 mon-itor Dashboard</h1>
+    <a href="?dark=${darkMode ? '0' : '1'}"><button class="dark-toggle">${darkMode ? '☀️ Light' : '🌙 Dark'}</button></a>
+  </div>
   <div class="status ${isRunning ? 'healthy' : 'unhealthy'}">
     Status: ${isRunning ? 'Running' : 'Starting'}
   </div>
@@ -1430,14 +1535,42 @@ function generateDashboardHTML() {
         <th>Watch</th>
         <th>Status</th>
         <th>Last Check</th>
+        <th>Next Run</th>
+        <th>Data</th>
         <th>Last Error</th>
-        <th>Error Count</th>
+        <th>Action</th>
       </tr>
     </thead>
     <tbody>
-      ${watchRows || '<tr><td colspan="5">No watches configured</td></tr>'}
+      ${watchRows || '<tr><td colspan="7">No watches configured</td></tr>'}
     </tbody>
   </table>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    async function triggerWatch(id) {
+      const btn = event.target;
+      btn.disabled = true;
+      btn.textContent = '⏳';
+      try {
+        const res = await fetch('/api/trigger?id=' + encodeURIComponent(id), { method: 'POST' });
+        const data = await res.json();
+        showToast(data.status === 'triggered' ? 'Watch triggered!' : 'Error: ' + data.error);
+        setTimeout(() => location.reload(), 2000);
+      } catch (e) {
+        showToast('Error: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = '▶ Run';
+      }
+    }
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      setTimeout(() => toast.style.display = 'none', 3000);
+    }
+  </script>
 </body>
 </html>`;
 }
@@ -1486,8 +1619,9 @@ function startHealthServer() {
       res.end(metrics);
 
     } else if (url.pathname === '/' || url.pathname === '/dashboard') {
+      const darkMode = url.searchParams.get('dark') === '1';
       res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(generateDashboardHTML());
+      res.end(generateDashboardHTML(darkMode));
 
     } else if (url.pathname === '/api/trigger' && req.method === 'POST') {
       // Manual trigger endpoint
