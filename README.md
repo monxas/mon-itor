@@ -684,6 +684,174 @@ curl -X POST "http://localhost:8080/api/trigger?id=my-watch"
 }
 ```
 
+### Stock/Availability Alert (Regex)
+
+Alert when a product comes back in stock:
+
+```json
+{
+  "id": "ps5-stock",
+  "name": "PS5 Stock Alert",
+  "url": "https://store.example.com/ps5",
+  "interval": 60000,
+  "extractors": [
+    {
+      "name": "status",
+      "type": "text",
+      "selector": ".availability-status",
+      "comparator": "regex",
+      "pattern": "in stock|available|add to cart",
+      "flags": "i"
+    }
+  ],
+  "messageTemplate": "🎮 <b>PS5 IN STOCK!</b>\n\nStatus: {{current.status}}\n\n🔗 <a href=\"{{url}}\">Buy now!</a>"
+}
+```
+
+### Alert When Text Disappears (Negate Regex)
+
+Alert when "maintenance" message is gone:
+
+```json
+{
+  "id": "maintenance-check",
+  "name": "Site Back Online",
+  "url": "https://example.com",
+  "extractors": [
+    {
+      "name": "page",
+      "type": "text",
+      "selector": "body",
+      "comparator": "regex",
+      "pattern": "maintenance|under construction|coming soon",
+      "flags": "i",
+      "negate": true
+    }
+  ],
+  "messageTemplate": "✅ Site is back online!"
+}
+```
+
+### Sports Score Monitor (JSON API)
+
+```json
+{
+  "id": "match-score",
+  "name": "Barcelona vs Madrid",
+  "url": "https://api.sportsdata.com/match/12345",
+  "interval": 30000,
+  "extractors": [
+    {
+      "name": "homeScore",
+      "type": "json",
+      "path": "$.score.home",
+      "comparator": "increased"
+    },
+    {
+      "name": "awayScore",
+      "type": "json",
+      "path": "$.score.away",
+      "comparator": "increased"
+    },
+    {
+      "name": "minute",
+      "type": "json",
+      "path": "$.minute",
+      "comparator": "none"
+    }
+  ],
+  "messageTemplate": "⚽ <b>GOAL!</b>\n\n{{current.homeScore}} - {{current.awayScore}}\n⏱️ Minute {{current.minute}}"
+}
+```
+
+### Concert Ticket Drop
+
+```json
+{
+  "id": "concert-tickets",
+  "name": "Taylor Swift Tickets",
+  "url": "https://tickets.example.com/event/123",
+  "schedule": "*/5 * * * *",
+  "actions": [
+    {
+      "type": "click",
+      "selector": "#cookie-accept",
+      "optional": true
+    },
+    {
+      "type": "waitForSelector",
+      "selector": ".ticket-options",
+      "timeout": 10000
+    }
+  ],
+  "extractors": [
+    {
+      "name": "tickets",
+      "type": "count",
+      "selector": ".ticket-option:not(.sold-out)",
+      "comparator": "increased"
+    },
+    {
+      "name": "sections",
+      "type": "text",
+      "selector": ".ticket-option:not(.sold-out) .section-name",
+      "comparator": "added"
+    }
+  ],
+  "messageTemplate": "🎫 <b>TICKETS AVAILABLE!</b>\n\n{{current.tickets}} options found\n\nSections:\n{{addedList}}\n\n🔗 <a href=\"{{url}}\">Get tickets!</a>"
+}
+```
+
+### Real Estate Listing Monitor
+
+```json
+{
+  "id": "apartment-search",
+  "name": "NYC Apartments",
+  "url": "https://realestate.example.com/search?city=nyc&max=3000",
+  "interval": 1800000,
+  "extractors": [
+    {
+      "name": "count",
+      "type": "count",
+      "selector": ".listing-card",
+      "comparator": "increased"
+    },
+    {
+      "name": "newListings",
+      "type": "evaluate",
+      "script": "Array.from(document.querySelectorAll('.listing-card')).slice(0,5).map(el => ({ address: el.querySelector('.address')?.textContent, price: el.querySelector('.price')?.textContent }))",
+      "comparator": "added"
+    }
+  ],
+  "messageTemplate": "🏠 <b>New Apartments!</b>\n\n{{addedList}}\n\n🔗 <a href=\"{{url}}\">View all</a>"
+}
+```
+
+### Website Uptime with Error Detection
+
+```json
+{
+  "id": "uptime-check",
+  "name": "Production Site",
+  "url": "https://myapp.com/health",
+  "interval": 60000,
+  "notifyOnError": true,
+  "errorThreshold": 2,
+  "extractors": [
+    {
+      "name": "status",
+      "type": "json",
+      "path": "$.status",
+      "comparator": "regex",
+      "pattern": "^ok$",
+      "negate": true
+    }
+  ],
+  "messageTemplate": "🔴 <b>SITE DOWN!</b>\n\nStatus: {{current.status}}\n\n🔗 {{url}}"
+}
+```
+
 ## Docker Compose
 
 ```yaml
